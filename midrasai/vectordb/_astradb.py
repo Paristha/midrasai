@@ -137,7 +137,7 @@ class AstraDB(VectorDB):
         unique_doc_ids_similarity: Dict[str, int] = {}
         for query_vector in query_embedding:
             # Search for similar vectors
-            search_results = collection.command.find(
+            search_results = collection.find(
                 filter={
                     "embedding_id": {"$gte": 0}
                 },  # Don't search metadata, which has embedding_id of -1
