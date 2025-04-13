@@ -132,10 +132,13 @@ class AstraDB(VectorDB):
         Returns:
             List of document metadata with similarity scores
         """
+        print("Changed the code")
         collection = self.database.get_collection(index)
         # Perform a search with each vector in the ColBERT query embedding
         unique_doc_ids_similarity: Dict[str, int] = {}
         for query_vector in query_embedding:
+            print(collection.keyspace)
+
             # Search for similar vectors
             search_results = collection.find(
                 filter={
