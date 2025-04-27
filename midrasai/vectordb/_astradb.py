@@ -104,16 +104,18 @@ class AstraDB(VectorDB):
         success = True
         try:
             now = datetime.datetime.now()
-            formatted_timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+            formatted_timestamp = now.strftime("%Y-%m-%d %H:%M:%S:%f")
             print(f"timestamp before insert: {formatted_timestamp}")
             result = collection.insert_many(
                 documents_to_insert, timeout_ms=300000, request_timeout_ms=60000
             )
             now = datetime.datetime.now()
-            formatted_timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+            formatted_timestamp = now.strftime("%Y-%m-%d %H:%M:%S:%f")
             print(f"timestamp after insert: {formatted_timestamp}")
-            print(f"Result of insert, {len(result.inserted_ids)} inserted.")
-            print(f"Raw results: {result.raw_results}, json dump: {json.dumps(result)}")
+            print(
+                f"Result of insert, {len(result.inserted_ids)} inserted of {len(documents_to_insert)}."
+            )
+            print(f"Raw results: {result.raw_results}")
             if not result or result.inserted_ids != len(documents_to_insert):
                 success = False
         except Exception as e:
@@ -131,7 +133,7 @@ class AstraDB(VectorDB):
             return False
 
     def search(
-        self, index: str, query_embedding: ColBERT, quantity: int, size: int = 10
+        self, index: str, query_embedding: ColBERT, quantity: int, size: int = 1000
     ) -> List[QueryResult]:
         """
         Search for documents similar to a ColBERT query embedding
@@ -140,7 +142,7 @@ class AstraDB(VectorDB):
             index: Name of the collection
             query_embedding: ColBERT embedding (list of vectors) to search with
             quantity: Maximum number of results to return
-            size: The AstraDB query results are indiviual vectors, not full embeddings, so quantity * size is used for actual limit of results returned, default is 10
+            size: The AstraDB query results are indiviual vectors, not full embeddings, so quantity * size is used for actual limit of results returned, default is 1000
 
         Returns:
             List of document metadata with similarity scores
@@ -186,7 +188,7 @@ class AstraDB(VectorDB):
             doc_id = str(metadata_doc.get("doc_id"))
             query_results.append(
                 QueryResult(
-                    id=doc_id,
+                    id=int(doc_id),
                     score=unique_doc_ids_similarity[doc_id],
                     data=metadata_doc.get("metadata"),
                 )
