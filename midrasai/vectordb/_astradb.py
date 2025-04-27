@@ -135,7 +135,7 @@ class AstraDB(VectorDB):
         quantity: int,
     ) -> List[QueryResult]:
         """
-        Search for documents similar to a ColBERT query embedding
+        Search for documents similar to a ColBERT query embedding using MaxSim
 
         Args:
             index: Name of the collection
@@ -147,7 +147,7 @@ class AstraDB(VectorDB):
         """
         collection = self.database.get_collection(index)
 
-        # Perform a search with each vector in the ColBERT query embedding
+        # Step 1 of MaxSim: Find maximum simarities between each query vector and document vectors.
         doc_max_sims: Dict[str, List[float]] = {}
         for doc_id in self.index_doc_ids[index]:
             doc_max_sims[doc_id] = [0] * len(query_embedding)
@@ -171,7 +171,7 @@ class AstraDB(VectorDB):
                     if similarity:
                         doc_max_sims[doc_id][i] = float(similarity)
 
-        # Calculate final scores by summing max similarities
+        # Step 2 of MaxSim: Calculate final scores by summing max query vector similarities of each document
         doc_scores = {}
         for doc_id, max_sims in doc_max_sims.items():
             doc_scores[doc_id] = sum(max_sims)
