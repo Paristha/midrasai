@@ -38,9 +38,13 @@ class AstraDB(VectorDB):
             .set_vector_metric(VectorMetric.COSINE)
             .build()
         )
-        return bool(
-            self.database.create_collection(name, definition=collection_definition)
-        )
+        try:
+            return bool(
+                self.database.create_collection(name, definition=collection_definition)
+            )
+        except Exception as e:
+            print(f"Error creating collection {name}: {e}")
+            return False
 
     def create_point(
         self, id: int | str, embedding: ColBERT, data: Dict[str, Any]
@@ -116,6 +120,7 @@ class AstraDB(VectorDB):
                 )
                 success = False
         except Exception as e:
+            print(f"Error inserting documents: {e}")
             success = False
 
         return success
@@ -167,7 +172,6 @@ class AstraDB(VectorDB):
                 )
                 if search_result:
                     similarity = search_result.get("$similarity")
-                    print(f"type of similarity {similarity}: {type(similarity)}")
                     if similarity:
                         doc_max_sims[doc_id][i] = float(similarity)
 
