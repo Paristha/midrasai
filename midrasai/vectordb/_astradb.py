@@ -111,9 +111,7 @@ class AstraDB(VectorDB):
         # Insert documents
         success = True
         try:
-            result = collection.insert_many(
-                documents_to_insert, timeout_ms=300000, request_timeout_ms=60000
-            )
+            result = collection.insert_many(documents_to_insert)
             if not result or len(result.inserted_ids) != len(documents_to_insert):
                 print(
                     f"Incomplete insert, {len(result.inserted_ids)} inserted of {len(documents_to_insert)}."
