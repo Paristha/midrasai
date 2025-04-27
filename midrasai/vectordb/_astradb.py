@@ -127,6 +127,7 @@ class AstraDB(VectorDB):
 
     def delete_index(self, name: str) -> bool:
         try:
+            self.index_doc_ids.pop(name, None)
             self.database.drop_collection(name)
             return True
         except Exception as e:
