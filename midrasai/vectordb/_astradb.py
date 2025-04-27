@@ -1,13 +1,13 @@
 import datetime
 import json
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
+from typing import Any, Dict, List, Set, Tuple
 
-from astrapy import DataAPIClient, Collection
+from astrapy import DataAPIClient
 from astrapy.authentication import TokenProvider
 from astrapy.info import CollectionDefinition
-from astrapy.constants import DefaultDocumentType, VectorMetric
+from astrapy.constants import VectorMetric
 
-from midrasai._abc import AsyncVectorDB, VectorDB
+from midrasai._abc import VectorDB
 from midrasai.types import ColBERT, QueryResult
 
 
@@ -20,6 +20,7 @@ class AstraDB(VectorDB):
     ):
         self.client = DataAPIClient(access_token)
         self.database = self.client.get_database(api_endpoint)
+        self.index_doc_ids: Dict[str, Set[str]] = {}
 
     def create_index(self, name: str) -> bool:
         """
@@ -30,6 +31,7 @@ class AstraDB(VectorDB):
         :return: Returns outcome of creating collection
         :rtype: bool
         """
+        self.index_doc_ids[name] = set()
         collection_definition = (
             CollectionDefinition.builder()
             .set_vector_dimension(128)
@@ -97,29 +99,23 @@ class AstraDB(VectorDB):
         documents_to_insert: List[Dict[str, Any]] = []
 
         for point in points:
+            doc_id = point[0].get("doc_id")
+            if doc_id:
+                self.index_doc_ids[index].add(doc_id)
             documents_to_insert.extend(point)
 
-        print(f"Inserting {len(documents_to_insert)} documents to {index}")
         # Insert documents
         success = True
         try:
-            now = datetime.datetime.now()
-            formatted_timestamp = now.strftime("%Y-%m-%d %H:%M:%S:%f")
-            print(f"timestamp before insert: {formatted_timestamp}")
             result = collection.insert_many(
                 documents_to_insert, timeout_ms=300000, request_timeout_ms=60000
             )
-            now = datetime.datetime.now()
-            formatted_timestamp = now.strftime("%Y-%m-%d %H:%M:%S:%f")
-            print(f"timestamp after insert: {formatted_timestamp}")
-            print(
-                f"Result of insert, {len(result.inserted_ids)} inserted of {len(documents_to_insert)}."
-            )
-            print(f"Raw results: {result.raw_results}")
-            if not result or result.inserted_ids != len(documents_to_insert):
+            if not result or len(result.inserted_ids) != len(documents_to_insert):
+                print(
+                    f"Incomplete insert, {len(result.inserted_ids)} inserted of {len(documents_to_insert)}."
+                )
                 success = False
         except Exception as e:
-            print(f"Error inserting batch: {e}")
             success = False
 
         return success
@@ -133,7 +129,10 @@ class AstraDB(VectorDB):
             return False
 
     def search(
-        self, index: str, query_embedding: ColBERT, quantity: int, size: int = 1000
+        self,
+        index: str,
+        query_embedding: ColBERT,
+        quantity: int,
     ) -> List[QueryResult]:
         """
         Search for documents similar to a ColBERT query embedding
@@ -142,64 +141,68 @@ class AstraDB(VectorDB):
             index: Name of the collection
             query_embedding: ColBERT embedding (list of vectors) to search with
             quantity: Maximum number of results to return
-            size: The AstraDB query results are indiviual vectors, not full embeddings, so quantity * size is used for actual limit of results returned, default is 1000
 
         Returns:
             List of document metadata with similarity scores
         """
-        print("Changed the code")
         collection = self.database.get_collection(index)
+
         # Perform a search with each vector in the ColBERT query embedding
-        unique_doc_ids_similarity: Dict[str, float] = {}
-        for query_vector in query_embedding:
-            print(collection.keyspace)
-
-            # Search for similar vectors
-            search_results = collection.find(
-                filter={
-                    "embedding_id": {"$gte": 0}
-                },  # Don't search metadata, which has embedding_id of -1
-                projection={"doc_id": True},
-                limit=quantity * size,
-                include_similarity=True,
-                sort={"$vector": query_vector},
-            )
-            # Process results, keeping track of highest similarity per unique doc_id
-            for result in search_results:
-                doc_id: str = str(result.get("doc_id"))
-                similarity = result.get("$similarity")
-                print(f"type of similarity {similarity}: {type(similarity)}")
-                if similarity and (
-                    doc_id not in unique_doc_ids_similarity
-                    or float(similarity) > unique_doc_ids_similarity[doc_id]
-                ):
-                    unique_doc_ids_similarity[doc_id] = float(similarity)
-
-        # Fetch metadata for each doc_id, create QueryResults
-        metadata_docs = collection.find(
-            filter={
-                "doc_id": {"$in": list(unique_doc_ids_similarity.keys())},
-                "embedding_id": -1,
-            },
-            projection={"doc_id": True, "metadata": True},
-        )
-        query_results: List[QueryResult] = []
-        for metadata_doc in metadata_docs:
-            doc_id = str(metadata_doc.get("doc_id"))
-            query_results.append(
-                QueryResult(
-                    id=int(doc_id),
-                    score=unique_doc_ids_similarity[doc_id],
-                    data=metadata_doc.get("metadata"),
+        doc_max_sims: Dict[str, List[float]] = {}
+        for doc_id in self.index_doc_ids[index]:
+            doc_max_sims[doc_id] = [0] * len(query_embedding)
+            for i, query_vector in enumerate(query_embedding):
+                # Search for highest similarity vector in document
+                search_result = collection.find_one(
+                    filter={
+                        "$and": [
+                            {"doc_id": doc_id},
+                            {
+                                "embedding_id": {"$gte": 0}
+                            },  # Don't search metadata, which has embedding_id of -1
+                        ]
+                    },
+                    include_similarity=True,
+                    sort={"$vector": query_vector},
                 )
-            )
-        # Sort by similarity score
-        sorted_results = sorted(
-            query_results,
-            key=lambda x: x.score,
-            reverse=True,
+                if search_result:
+                    similarity = search_result.get("$similarity")
+                    print(f"type of similarity {similarity}: {type(similarity)}")
+                    if similarity:
+                        doc_max_sims[doc_id][i] = float(similarity)
+
+        # Calculate final scores by summing max similarities
+        doc_scores = {}
+        for doc_id, max_sims in doc_max_sims.items():
+            doc_scores[doc_id] = sum(max_sims)
+
+        # Sort documents by score
+        sorted_docs: List[Tuple[str, float]] = sorted(
+            doc_scores.items(), key=lambda x: x[1], reverse=True
         )[
             :quantity
         ]  # Limit to requested number of results
 
-        return sorted_results
+        # Fetch metadata for each doc_id
+        metadata_docs = collection.find(
+            filter={
+                "doc_id": {"$in": [item[0] for item in sorted_docs]},
+                "embedding_id": -1,
+            },
+            projection={"doc_id": True, "metadata": True},
+        )
+        metadata_dict = {
+            doc.get("doc_id"): doc.get("metadata") for doc in metadata_docs
+        }
+
+        # Create query results, already in sorted order
+        query_results: List[QueryResult] = []
+        for doc_id, similarity in sorted_docs:
+            query_results.append(
+                QueryResult(
+                    id=int(doc_id),
+                    score=similarity,
+                    data=metadata_dict[doc_id],
+                )
+            )
+        return query_results
