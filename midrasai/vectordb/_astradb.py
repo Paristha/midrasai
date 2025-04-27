@@ -1,3 +1,5 @@
+import datetime
+import json
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from astrapy import DataAPIClient, Collection
@@ -97,10 +99,21 @@ class AstraDB(VectorDB):
         for point in points:
             documents_to_insert.extend(point)
 
+        print(f"Inserting {len(documents_to_insert)} documents to {index}")
         # Insert documents
         success = True
         try:
-            result = collection.insert_many(documents_to_insert)
+            now = datetime.datetime.now()
+            formatted_timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+            print(f"timestamp before insert: {formatted_timestamp}")
+            result = collection.insert_many(
+                documents_to_insert, timeout_ms=300000, request_timeout_ms=60000
+            )
+            now = datetime.datetime.now()
+            formatted_timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+            print(f"timestamp after insert: {formatted_timestamp}")
+            print(f"Result of insert, {len(result.inserted_ids)} inserted.")
+            print(f"Raw results: {result.raw_results}, json dump: {json.dumps(result)}")
             if not result or result.inserted_ids != len(documents_to_insert):
                 success = False
         except Exception as e:
@@ -135,7 +148,7 @@ class AstraDB(VectorDB):
         print("Changed the code")
         collection = self.database.get_collection(index)
         # Perform a search with each vector in the ColBERT query embedding
-        unique_doc_ids_similarity: Dict[str, int] = {}
+        unique_doc_ids_similarity: Dict[str, float] = {}
         for query_vector in query_embedding:
             print(collection.keyspace)
 
@@ -153,11 +166,12 @@ class AstraDB(VectorDB):
             for result in search_results:
                 doc_id: str = str(result.get("doc_id"))
                 similarity = result.get("$similarity")
-                if (
+                print(f"type of similarity {similarity}: {type(similarity)}")
+                if similarity and (
                     doc_id not in unique_doc_ids_similarity
-                    or similarity > unique_doc_ids_similarity[doc_id]
+                    or float(similarity) > unique_doc_ids_similarity[doc_id]
                 ):
-                    unique_doc_ids_similarity[doc_id] = similarity
+                    unique_doc_ids_similarity[doc_id] = float(similarity)
 
         # Fetch metadata for each doc_id, create QueryResults
         metadata_docs = collection.find(
